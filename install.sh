@@ -121,7 +121,9 @@ ok "Secrets generated."
 # ── Create install directory ──────────────────────────────────────────────────
 
 mkdir -p "$INSTALL_DIR"
+mkdir -p "$INSTALL_DIR/logs"
 chmod 700 "$INSTALL_DIR"
+chmod 777 "$INSTALL_DIR/logs"
 
 # ── Write Caddyfile (only when using Caddy) ───────────────────────────────────
 
@@ -158,10 +160,11 @@ SESSION_DRIVER=database
 SESSION_LIFETIME=120
 SESSION_SECURE_COOKIE=${SESSION_SECURE}
 DASH_URL=${DASH_URL}
-SETUP_COMPLETE=
 EOF
 
-chmod 600 "$INSTALL_DIR/admin.env"
+# 666 inside a 700 directory: host-protected but writable by the container's www-data.
+# The install wizard writes Keycloak credentials and SETUP_COMPLETE back to this file.
+chmod 666 "$INSTALL_DIR/admin.env"
 ok "admin.env written."
 
 # ── Write dash.env ────────────────────────────────────────────────────────────
@@ -242,6 +245,9 @@ services:
     image: ${ADMIN_IMAGE}
     restart: unless-stopped
     env_file: admin.env
+    volumes:
+      - ./admin.env:/var/www/html/lintune-admin/.env
+      - ./logs:/var/www/html/lintune-admin/storage/logs/install
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
@@ -313,6 +319,9 @@ services:
     ports:
       - "8889:80"
     env_file: admin.env
+    volumes:
+      - ./admin.env:/var/www/html/lintune-admin/.env
+      - ./logs:/var/www/html/lintune-admin/storage/logs/install
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
@@ -384,8 +393,8 @@ ok "Tenant dash : ${DASH_URL}"
 if ! $USE_CADDY; then
     printf "\n"
     info "Ports exposed on this host:"
-    info "  Admin : 8889  →  point your proxy to http://$(hostname -I | awk '{print $1}'):8889"
-    info "  Dash  : 8888  →  point your proxy to http://$(hostname -I | awk '{print $1}'):8888"
+    info "  Admin : 8889  ->  point your proxy to http://$(hostname -I | awk '{print $1}'):8889"
+    info "  Dash  : 8888  ->  point your proxy to http://$(hostname -I | awk '{print $1}'):8888"
 fi
 
 printf "\n"
