@@ -66,46 +66,45 @@ printf "\n"
 bold "Configuration"
 printf "\n"
 
+# ── Base domain ────────────────────────────────────────────────────────────────
+
+BASE_DOMAIN=$(ask "Base domain (e.g. lintune.company.com):")
+[ -n "$BASE_DOMAIN" ] || die "Base domain is required."
+
+ADMIN_DOMAIN="admin.${BASE_DOMAIN}"
+DASH_DOMAIN="dash.${BASE_DOMAIN}"
+
+ADMIN_URL="https://${ADMIN_DOMAIN}"
+DASH_URL="https://${DASH_DOMAIN}"
+SESSION_SECURE=true
+
+printf "\n"
+info "Service subdomains (point all to this server's IP):"
+info "  Admin panel  ->  ${ADMIN_DOMAIN}"
+info "  Tenant dash  ->  ${DASH_DOMAIN}"
+info "  Keycloak     ->  auth.${BASE_DOMAIN}"
+info "  Mailcow      ->  mail.${BASE_DOMAIN}"
+info "  Nextcloud    ->  cloud.${BASE_DOMAIN}"
+info "  Vaultwarden  ->  vault.${BASE_DOMAIN}"
+printf "\n"
+
 # ── Reverse proxy choice ───────────────────────────────────────────────────────
 
-USE_CADDY_REPLY=$(ask "Use Caddy as automatic reverse proxy with SSL? [Y/n]")
+USE_CADDY_REPLY=$(ask "Use Caddy as automatic reverse proxy with SSL for admin + dash? [Y/n]")
 case "$USE_CADDY_REPLY" in
     [nN]*) USE_CADDY=false ;;
     *)     USE_CADDY=true  ;;
 esac
 
 if $USE_CADDY; then
-    printf "\n"
-    info "Both domains must already point to this server's IP before Caddy can issue SSL certificates."
-    printf "\n"
-
-    ADMIN_DOMAIN=$(ask "Admin panel domain (e.g. admin.company.com):")
-    [ -n "$ADMIN_DOMAIN" ] || die "Admin domain is required."
-
-    DASH_DOMAIN=$(ask "Tenant dashboard domain (e.g. dash.company.com):")
-    [ -n "$DASH_DOMAIN" ] || die "Dash domain is required."
-
-    ADMIN_URL="https://${ADMIN_DOMAIN}"
-    DASH_URL="https://${DASH_DOMAIN}"
-    SESSION_SECURE=true
+    info "Caddy will obtain SSL certificates for ${ADMIN_DOMAIN} and ${DASH_DOMAIN} automatically."
+    info "Keycloak, Mailcow, and Nextcloud manage their own SSL or sit behind your external proxy."
 else
     printf "\n"
     info "Admin will be exposed on port 8889, tenant dashboard on port 8888."
-    info "Point your reverse proxy (Caddy, Nginx, Cloudflare Tunnel, etc.) to these ports."
-    printf "\n"
-
-    ADMIN_URL=$(ask "Full public URL for admin panel (e.g. https://admin.company.com):")
-    [ -n "$ADMIN_URL" ] || die "Admin URL is required."
-
-    DASH_URL=$(ask "Full public URL for tenant dashboard (e.g. https://dash.company.com):")
-    [ -n "$DASH_URL" ] || die "Dash URL is required."
-
-    # Use secure cookies only when the public URL is HTTPS
-    case "$ADMIN_URL" in
-        https://*) SESSION_SECURE=true  ;;
-        *)         SESSION_SECURE=false ;;
-    esac
+    info "Point your reverse proxy to these ports for ${ADMIN_DOMAIN} and ${DASH_DOMAIN}."
 fi
+printf "\n"
 
 # ── Generate secrets ──────────────────────────────────────────────────────────
 
@@ -160,6 +159,7 @@ SESSION_DRIVER=database
 SESSION_LIFETIME=120
 SESSION_SECURE_COOKIE=${SESSION_SECURE}
 DASH_URL=${DASH_URL}
+BASE_DOMAIN=${BASE_DOMAIN}
 EOF
 
 # 666 inside a 700 directory: host-protected but writable by the container's www-data.
@@ -186,6 +186,7 @@ DB_PASSWORD=${DB_PASSWORD}
 SESSION_DRIVER=database
 SESSION_LIFETIME=120
 SESSION_SECURE_COOKIE=${SESSION_SECURE}
+BASE_DOMAIN=${BASE_DOMAIN}
 KEYCLOAK_BASE_URL=
 KEYCLOAK_CLIENT_ID=lintune-frontend
 KEYCLOAK_ALLOWED_GROUPS=realm-admin
@@ -402,6 +403,11 @@ warn "Secrets saved to: ${INSTALL_DIR}/.env  (root-readable only)"
 warn "App env files  : ${INSTALL_DIR}/admin.env and ${INSTALL_DIR}/dash.env"
 printf "\n"
 info "Open ${ADMIN_URL} in your browser to complete the setup wizard."
+info "The wizard will pre-fill service domains from base domain: ${BASE_DOMAIN}"
+printf "\n"
+info "  Keycloak  ->  https://auth.${BASE_DOMAIN}"
+info "  Mailcow   ->  https://mail.${BASE_DOMAIN}"
+info "  Nextcloud ->  https://cloud.${BASE_DOMAIN}"
 printf "\n"
 info "To view logs:    docker compose -f ${INSTALL_DIR}/docker-compose.yml logs -f"
 info "To stop:         docker compose -f ${INSTALL_DIR}/docker-compose.yml down"
