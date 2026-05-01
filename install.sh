@@ -143,7 +143,7 @@ fi
 # ── Write admin.env ───────────────────────────────────────────────────────────
 
 cat > "$INSTALL_DIR/admin.env" << EOF
-APP_NAME=Lintune Admin
+APP_NAME="Lintune Admin"
 APP_ENV=production
 APP_KEY=${APP_KEY}
 APP_DEBUG=false
