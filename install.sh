@@ -292,6 +292,8 @@ services:
   uptime-kuma:
     image: louislam/uptime-kuma:2
     restart: unless-stopped
+    environment:
+      - UPTIME_KUMA_DB_TYPE=sqlite
     volumes:
       - kuma_data:/app/data
     networks:
