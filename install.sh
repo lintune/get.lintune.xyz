@@ -73,6 +73,7 @@ BASE_DOMAIN=$(ask "Base domain (e.g. lintune.company.com):")
 
 ADMIN_DOMAIN="admin.${BASE_DOMAIN}"
 DASH_DOMAIN="dash.${BASE_DOMAIN}"
+KUMA_DOMAIN="isitup.${BASE_DOMAIN}"
 
 ADMIN_URL="https://${ADMIN_DOMAIN}"
 DASH_URL="https://${DASH_DOMAIN}"
@@ -86,6 +87,7 @@ info "  Keycloak     ->  auth.${BASE_DOMAIN}"
 info "  Mailcow      ->  mail.${BASE_DOMAIN}"
 info "  Nextcloud    ->  cloud.${BASE_DOMAIN}"
 info "  Vaultwarden  ->  vault.${BASE_DOMAIN}"
+info "  Status       ->  ${KUMA_DOMAIN}"
 printf "\n"
 
 # ── Reverse proxy choice ───────────────────────────────────────────────────────
@@ -135,6 +137,10 @@ ${ADMIN_DOMAIN} {
 ${DASH_DOMAIN} {
     reverse_proxy lintune-dash:80
 }
+
+${KUMA_DOMAIN} {
+    reverse_proxy uptime-kuma:3001
+}
 EOF
     ok "Caddyfile written."
 fi
@@ -160,6 +166,8 @@ SESSION_LIFETIME=120
 SESSION_SECURE_COOKIE=${SESSION_SECURE}
 DASH_URL=${DASH_URL}
 BASE_DOMAIN=${BASE_DOMAIN}
+KUMA_URL=https://${KUMA_DOMAIN}
+KUMA_INTERNAL_URL=http://uptime-kuma:3001
 EOF
 
 # 666 inside a 700 directory: host-protected but writable by the container's www-data.
@@ -281,10 +289,19 @@ services:
     networks:
       - internal
 
+  uptime-kuma:
+    image: louislam/uptime-kuma:2
+    restart: unless-stopped
+    volumes:
+      - kuma_data:/app/data
+    networks:
+      - internal
+
 volumes:
   db_data:
   caddy_data:
   caddy_config:
+  kuma_data:
 
 networks:
   internal:
@@ -343,8 +360,19 @@ services:
     networks:
       - internal
 
+  uptime-kuma:
+    image: louislam/uptime-kuma:2
+    restart: unless-stopped
+    ports:
+      - "3001:3001"
+    volumes:
+      - kuma_data:/app/data
+    networks:
+      - internal
+
 volumes:
   db_data:
+  kuma_data:
 
 networks:
   internal:
