@@ -365,6 +365,8 @@ services:
   uptime-kuma:
     image: louislam/uptime-kuma:2
     restart: unless-stopped
+    environment:
+      - UPTIME_KUMA_DB_TYPE=sqlite
     ports:
       - "3001:3001"
     volumes:
