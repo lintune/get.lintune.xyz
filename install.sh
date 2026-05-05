@@ -304,7 +304,7 @@ services:
       - internal
 
   uptime-kuma:
-    image: stephancraane/uptime-kuma:latest
+    image: ghcr.io/lintune/uptime-kuma:latest
     restart: unless-stopped
     environment:
       - UPTIME_KUMA_DB_TYPE=mariadb
@@ -383,7 +383,7 @@ services:
       - internal
 
   uptime-kuma:
-    image: stephancraane/uptime-kuma:latest
+    image: ghcr.io/lintune/uptime-kuma:latest
     restart: unless-stopped
     environment:
       - UPTIME_KUMA_DB_TYPE=mariadb
