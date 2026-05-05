@@ -479,7 +479,8 @@ echo $r["api_key"] ?? "";
         docker compose restart lintune-admin lintune-dash >/dev/null 2>&1
         ok "Uptime Kuma ready (user: ${KUMA_ADMIN_USER})."
     else
-        warn "Kuma setup failed — log in at https://${KUMA_DOMAIN} to set up manually."
+        warn "Kuma setup returned no API key — Kuma may already be initialised or the image is wrong."
+        warn "Run manually: POST http://localhost:3001/api/lintune/setup, then set KUMA_API_KEY in admin.env and dash.env."
     fi
 fi
 
