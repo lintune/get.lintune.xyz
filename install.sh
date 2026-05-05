@@ -236,6 +236,17 @@ EOF
 chmod 600 "$INSTALL_DIR/.env"
 ok "Secrets reference (.env) written."
 
+# ── Write MariaDB init script ─────────────────────────────────────────────────
+
+cat > "$INSTALL_DIR/init-kuma.sql" << EOF
+CREATE DATABASE IF NOT EXISTS \`${KUMA_DB_NAME}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+GRANT ALL PRIVILEGES ON \`${KUMA_DB_NAME}\`.* TO '${DB_USERNAME}'@'%';
+FLUSH PRIVILEGES;
+EOF
+
+chmod 644 "$INSTALL_DIR/init-kuma.sql"
+ok "MariaDB init script written."
+
 # ── Write docker-compose.yml ──────────────────────────────────────────────────
 
 if $USE_CADDY; then
@@ -253,6 +264,7 @@ services:
       MARIADB_PASSWORD: ${DB_PASSWORD}
     volumes:
       - db_data:/var/lib/mysql
+      - ./init-kuma.sql:/docker-entrypoint-initdb.d/init-kuma.sql:ro
     networks:
       - internal
     healthcheck:
@@ -310,6 +322,9 @@ services:
       - UPTIME_KUMA_DB_NAME=${KUMA_DB_NAME}
       - UPTIME_KUMA_DB_USERNAME=${DB_USERNAME}
       - UPTIME_KUMA_DB_PASSWORD=${DB_PASSWORD}
+    depends_on:
+      db:
+        condition: service_healthy
     networks:
       - internal
 
@@ -338,6 +353,7 @@ services:
       MARIADB_PASSWORD: ${DB_PASSWORD}
     volumes:
       - db_data:/var/lib/mysql
+      - ./init-kuma.sql:/docker-entrypoint-initdb.d/init-kuma.sql:ro
     networks:
       - internal
     healthcheck:
@@ -385,6 +401,9 @@ services:
       - UPTIME_KUMA_DB_NAME=${KUMA_DB_NAME}
       - UPTIME_KUMA_DB_USERNAME=${DB_USERNAME}
       - UPTIME_KUMA_DB_PASSWORD=${DB_PASSWORD}
+    depends_on:
+      db:
+        condition: service_healthy
     ports:
       - "3001:3001"
     networks:
@@ -415,21 +434,6 @@ docker compose pull
 
 info "Starting services..."
 docker compose up -d
-
-# ── Create Kuma database ──────────────────────────────────────────────────────
-
-info "Creating Kuma database..."
-TRIES=0
-until docker compose exec -T db mariadb -u root -p"${DB_ROOT_PASSWORD}" -e "SELECT 1" >/dev/null 2>&1; do
-    TRIES=$((TRIES + 1))
-    [ "$TRIES" -ge 30 ] && die "MariaDB did not start within 60 seconds."
-    sleep 2
-done
-docker compose exec -T db mariadb -u root -p"${DB_ROOT_PASSWORD}" -e \
-    "CREATE DATABASE IF NOT EXISTS \`${KUMA_DB_NAME}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-     GRANT ALL PRIVILEGES ON \`${KUMA_DB_NAME}\`.* TO '${DB_USERNAME}'@'%';
-     FLUSH PRIVILEGES;" 2>/dev/null
-ok "Kuma database ready."
 
 # ── Wait for admin to be reachable ────────────────────────────────────────────
 
