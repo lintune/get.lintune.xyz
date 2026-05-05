@@ -116,6 +116,7 @@ DB_ROOT_PASSWORD=$(openssl rand -hex 20)
 DB_PASSWORD=$(openssl rand -hex 20)
 DB_DATABASE=lintune
 DB_USERNAME=lintune
+KUMA_DB_NAME=kuma
 
 ok "Secrets generated."
 
@@ -168,7 +169,11 @@ DASH_URL=${DASH_URL}
 BASE_DOMAIN=${BASE_DOMAIN}
 KUMA_URL=https://${KUMA_DOMAIN}
 KUMA_INTERNAL_URL=http://uptime-kuma:3001
-KUMA_DB_PATH=/opt/kuma_data/kuma.db
+KUMA_DB_HOST=db
+KUMA_DB_PORT=3306
+KUMA_DB_NAME=${KUMA_DB_NAME}
+KUMA_DB_USERNAME=${DB_USERNAME}
+KUMA_DB_PASSWORD=${DB_PASSWORD}
 EOF
 
 # 666 inside a 700 directory: host-protected but writable by the container's www-data.
@@ -200,7 +205,11 @@ KEYCLOAK_BASE_URL=
 KEYCLOAK_CLIENT_ID=lintune-frontend
 KEYCLOAK_ALLOWED_GROUPS=realm-admin
 KEYCLOAK_ADMIN_CLI_CLIENT=admin-cli
-KUMA_DB_PATH=/opt/kuma_data/kuma.db
+KUMA_DB_HOST=db
+KUMA_DB_PORT=3306
+KUMA_DB_NAME=${KUMA_DB_NAME}
+KUMA_DB_USERNAME=${DB_USERNAME}
+KUMA_DB_PASSWORD=${DB_PASSWORD}
 EOF
 
 chmod 600 "$INSTALL_DIR/dash.env"
@@ -259,7 +268,6 @@ services:
     volumes:
       - ./admin.env:/var/www/html/lintune-admin/.env
       - ./logs:/var/www/html/lintune-admin/storage/logs/install
-      - kuma_data:/opt/kuma_data
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
@@ -272,8 +280,6 @@ services:
     image: ${DASH_IMAGE}
     restart: unless-stopped
     env_file: dash.env
-    volumes:
-      - kuma_data:/opt/kuma_data:ro
     depends_on:
       db:
         condition: service_healthy
@@ -298,9 +304,12 @@ services:
     image: louislam/uptime-kuma:2
     restart: unless-stopped
     environment:
-      - UPTIME_KUMA_DB_TYPE=sqlite
-    volumes:
-      - kuma_data:/app/data
+      - UPTIME_KUMA_DB_TYPE=mariadb
+      - UPTIME_KUMA_DB_HOSTNAME=db
+      - UPTIME_KUMA_DB_PORT=3306
+      - UPTIME_KUMA_DB_NAME=${KUMA_DB_NAME}
+      - UPTIME_KUMA_DB_USERNAME=${DB_USERNAME}
+      - UPTIME_KUMA_DB_PASSWORD=${DB_PASSWORD}
     networks:
       - internal
 
@@ -308,7 +317,6 @@ volumes:
   db_data:
   caddy_data:
   caddy_config:
-  kuma_data:
 
 networks:
   internal:
@@ -347,7 +355,6 @@ services:
     volumes:
       - ./admin.env:/var/www/html/lintune-admin/.env
       - ./logs:/var/www/html/lintune-admin/storage/logs/install
-      - kuma_data:/opt/kuma_data
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
@@ -362,8 +369,6 @@ services:
     ports:
       - "8888:80"
     env_file: dash.env
-    volumes:
-      - kuma_data:/opt/kuma_data:ro
     depends_on:
       db:
         condition: service_healthy
@@ -374,17 +379,19 @@ services:
     image: louislam/uptime-kuma:2
     restart: unless-stopped
     environment:
-      - UPTIME_KUMA_DB_TYPE=sqlite
+      - UPTIME_KUMA_DB_TYPE=mariadb
+      - UPTIME_KUMA_DB_HOSTNAME=db
+      - UPTIME_KUMA_DB_PORT=3306
+      - UPTIME_KUMA_DB_NAME=${KUMA_DB_NAME}
+      - UPTIME_KUMA_DB_USERNAME=${DB_USERNAME}
+      - UPTIME_KUMA_DB_PASSWORD=${DB_PASSWORD}
     ports:
       - "3001:3001"
-    volumes:
-      - kuma_data:/app/data
     networks:
       - internal
 
 volumes:
   db_data:
-  kuma_data:
 
 networks:
   internal:
@@ -408,6 +415,21 @@ docker compose pull
 
 info "Starting services..."
 docker compose up -d
+
+# ── Create Kuma database ──────────────────────────────────────────────────────
+
+info "Creating Kuma database..."
+TRIES=0
+until docker compose exec -T db mariadb -u root -p"${DB_ROOT_PASSWORD}" -e "SELECT 1" >/dev/null 2>&1; do
+    TRIES=$((TRIES + 1))
+    [ "$TRIES" -ge 30 ] && die "MariaDB did not start within 60 seconds."
+    sleep 2
+done
+docker compose exec -T db mariadb -u root -p"${DB_ROOT_PASSWORD}" -e \
+    "CREATE DATABASE IF NOT EXISTS \`${KUMA_DB_NAME}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+     GRANT ALL PRIVILEGES ON \`${KUMA_DB_NAME}\`.* TO '${DB_USERNAME}'@'%';
+     FLUSH PRIVILEGES;" 2>/dev/null
+ok "Kuma database ready."
 
 # ── Wait for admin to be reachable ────────────────────────────────────────────
 
