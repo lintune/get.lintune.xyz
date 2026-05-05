@@ -117,8 +117,6 @@ DB_PASSWORD=$(openssl rand -hex 20)
 DB_DATABASE=lintune
 DB_USERNAME=lintune
 KUMA_DB_NAME=kuma
-KUMA_ADMIN_USER=admin
-KUMA_ADMIN_PASSWORD=$(openssl rand -hex 16)
 
 ok "Secrets generated."
 
@@ -171,9 +169,6 @@ DASH_URL=${DASH_URL}
 BASE_DOMAIN=${BASE_DOMAIN}
 KUMA_URL=https://${KUMA_DOMAIN}
 KUMA_INTERNAL_URL=http://uptime-kuma:3001
-KUMA_API_KEY=
-KUMA_ADMIN_USER=${KUMA_ADMIN_USER}
-KUMA_ADMIN_PASSWORD=${KUMA_ADMIN_PASSWORD}
 EOF
 
 # 666 inside a 700 directory: host-protected but writable by the container's www-data.
@@ -206,7 +201,6 @@ KEYCLOAK_CLIENT_ID=lintune-frontend
 KEYCLOAK_ALLOWED_GROUPS=realm-admin
 KEYCLOAK_ADMIN_CLI_CLIENT=admin-cli
 KUMA_INTERNAL_URL=http://uptime-kuma:3001
-KUMA_API_KEY=
 EOF
 
 chmod 600 "$INSTALL_DIR/dash.env"
@@ -446,43 +440,7 @@ done
 
 ok "lintune-admin is up."
 
-# ── Setup Kuma via REST API ───────────────────────────────────────────────────
-
-info "Waiting for Uptime Kuma..."
-KUMA_TRIES=0
-until docker compose exec -T lintune-admin \
-        php -r 'exit(@file_get_contents("http://uptime-kuma:3001/api/entry-page") !== false ? 0 : 1);' \
-        >/dev/null 2>&1; do
-    KUMA_TRIES=$((KUMA_TRIES + 1))
-    if [ "$KUMA_TRIES" -ge 30 ]; then
-        warn "Kuma not reachable after 60s; skipping setup."
-        KUMA_TRIES=999
-        break
-    fi
-    sleep 2
-done
-
-if [ "$KUMA_TRIES" -lt 999 ]; then
-    KUMA_API_KEY=$(docker compose exec -T lintune-admin php -r '
-$ctx = stream_context_create(["http" => [
-    "method"        => "POST",
-    "header"        => "Content-Type: application/json\r\n",
-    "content"       => json_encode(["username" => getenv("KUMA_ADMIN_USER"), "password" => getenv("KUMA_ADMIN_PASSWORD")]),
-    "ignore_errors" => true,
-]]);
-$r = json_decode(@file_get_contents("http://uptime-kuma:3001/api/lintune/setup", false, $ctx), true);
-echo $r["api_key"] ?? "";
-')
-    if [ -n "$KUMA_API_KEY" ]; then
-        sed -i "s|^KUMA_API_KEY=.*|KUMA_API_KEY=${KUMA_API_KEY}|" "$INSTALL_DIR/admin.env"
-        sed -i "s|^KUMA_API_KEY=.*|KUMA_API_KEY=${KUMA_API_KEY}|" "$INSTALL_DIR/dash.env"
-        docker compose restart lintune-admin lintune-dash >/dev/null 2>&1
-        ok "Uptime Kuma ready (user: ${KUMA_ADMIN_USER})."
-    else
-        warn "Kuma setup returned no API key — Kuma may already be initialised or the image is wrong."
-        warn "Run manually: POST http://localhost:3001/api/lintune/setup, then set KUMA_API_KEY in admin.env and dash.env."
-    fi
-fi
+ok "Uptime Kuma will be configured during the web setup wizard."
 
 # ── Done ──────────────────────────────────────────────────────────────────────
 
@@ -493,7 +451,7 @@ bold "╚═══════════════════════�
 printf "\n"
 ok "Admin panel  : ${ADMIN_URL}"
 ok "Tenant dash  : ${DASH_URL}"
-ok "Status page  : https://${KUMA_DOMAIN}  (user: ${KUMA_ADMIN_USER} / ${KUMA_ADMIN_PASSWORD})"
+ok "Status page  : https://${KUMA_DOMAIN}  (credentials set during wizard)"
 
 if ! $USE_CADDY; then
     printf "\n"
