@@ -171,11 +171,7 @@ DASH_URL=${DASH_URL}
 BASE_DOMAIN=${BASE_DOMAIN}
 KUMA_URL=https://${KUMA_DOMAIN}
 KUMA_INTERNAL_URL=http://uptime-kuma:3001
-KUMA_DB_HOST=db
-KUMA_DB_PORT=3306
-KUMA_DB_NAME=${KUMA_DB_NAME}
-KUMA_DB_USERNAME=${DB_USERNAME}
-KUMA_DB_PASSWORD=${DB_PASSWORD}
+KUMA_API_KEY=
 KUMA_ADMIN_USER=${KUMA_ADMIN_USER}
 KUMA_ADMIN_PASSWORD=${KUMA_ADMIN_PASSWORD}
 EOF
@@ -209,11 +205,8 @@ KEYCLOAK_BASE_URL=
 KEYCLOAK_CLIENT_ID=lintune-frontend
 KEYCLOAK_ALLOWED_GROUPS=realm-admin
 KEYCLOAK_ADMIN_CLI_CLIENT=admin-cli
-KUMA_DB_HOST=db
-KUMA_DB_PORT=3306
-KUMA_DB_NAME=${KUMA_DB_NAME}
-KUMA_DB_USERNAME=${DB_USERNAME}
-KUMA_DB_PASSWORD=${DB_PASSWORD}
+KUMA_INTERNAL_URL=http://uptime-kuma:3001
+KUMA_API_KEY=
 EOF
 
 chmod 600 "$INSTALL_DIR/dash.env"
@@ -317,7 +310,7 @@ services:
       - internal
 
   uptime-kuma:
-    image: louislam/uptime-kuma:2
+    image: stephancraane/uptime-kuma:latest
     restart: unless-stopped
     environment:
       - UPTIME_KUMA_DB_TYPE=mariadb
@@ -396,7 +389,7 @@ services:
       - internal
 
   uptime-kuma:
-    image: louislam/uptime-kuma:2
+    image: stephancraane/uptime-kuma:latest
     restart: unless-stopped
     environment:
       - UPTIME_KUMA_DB_TYPE=mariadb
@@ -453,37 +446,41 @@ done
 
 ok "lintune-admin is up."
 
-# ── Seed Kuma admin user ─────────────────────────────────────────────────────
-# Kuma caches "no user found" at startup. We seed the user now (lintune-admin is
-# up so we can use PHP for bcrypt), then restart Kuma once so it enters login mode.
+# ── Setup Kuma via REST API ───────────────────────────────────────────────────
 
-info "Seeding Kuma admin user..."
-KUMA_SCHEMA_READY=false
+info "Waiting for Uptime Kuma..."
 KUMA_TRIES=0
-until docker compose exec -T db mariadb -u "${DB_USERNAME}" -p"${DB_PASSWORD}" "${KUMA_DB_NAME}" \
-        -e "SELECT 1 FROM \`user\` LIMIT 1" >/dev/null 2>&1; do
+until docker compose exec -T lintune-admin \
+        php -r 'exit(@file_get_contents("http://uptime-kuma:3001/api/entry-page") !== false ? 0 : 1);' \
+        >/dev/null 2>&1; do
     KUMA_TRIES=$((KUMA_TRIES + 1))
     if [ "$KUMA_TRIES" -ge 30 ]; then
-        warn "Kuma schema not ready; skipping user seed."
+        warn "Kuma not reachable after 60s; skipping setup."
+        KUMA_TRIES=999
         break
     fi
     sleep 2
 done
-if docker compose exec -T db mariadb -u "${DB_USERNAME}" -p"${DB_PASSWORD}" "${KUMA_DB_NAME}" \
-        -e "SELECT 1 FROM \`user\` LIMIT 1" >/dev/null 2>&1; then
-    KUMA_SCHEMA_READY=true
-fi
 
-if $KUMA_SCHEMA_READY; then
-    KUMA_HASH=$(docker compose exec -T lintune-admin \
-        php -r "echo password_hash('${KUMA_ADMIN_PASSWORD}', PASSWORD_BCRYPT, ['cost' => 10]);")
-    docker compose exec -T db mariadb -u "${DB_USERNAME}" -p"${DB_PASSWORD}" "${KUMA_DB_NAME}" \
-        -e "INSERT IGNORE INTO \`user\` (username, password, active) VALUES ('${KUMA_ADMIN_USER}', '${KUMA_HASH}', 1);" \
-        2>/dev/null
-    docker compose restart uptime-kuma >/dev/null 2>&1
-    ok "Kuma admin user seeded (user: ${KUMA_ADMIN_USER})."
-else
-    warn "Kuma user not seeded — log in at https://${KUMA_DOMAIN} to complete setup manually."
+if [ "$KUMA_TRIES" -lt 999 ]; then
+    KUMA_API_KEY=$(docker compose exec -T lintune-admin php -r '
+$ctx = stream_context_create(["http" => [
+    "method"        => "POST",
+    "header"        => "Content-Type: application/json\r\n",
+    "content"       => json_encode(["username" => getenv("KUMA_ADMIN_USER"), "password" => getenv("KUMA_ADMIN_PASSWORD")]),
+    "ignore_errors" => true,
+]]);
+$r = json_decode(@file_get_contents("http://uptime-kuma:3001/api/lintune/setup", false, $ctx), true);
+echo $r["api_key"] ?? "";
+')
+    if [ -n "$KUMA_API_KEY" ]; then
+        sed -i "s|^KUMA_API_KEY=.*|KUMA_API_KEY=${KUMA_API_KEY}|" "$INSTALL_DIR/admin.env"
+        sed -i "s|^KUMA_API_KEY=.*|KUMA_API_KEY=${KUMA_API_KEY}|" "$INSTALL_DIR/dash.env"
+        docker compose restart lintune-admin lintune-dash >/dev/null 2>&1
+        ok "Uptime Kuma ready (user: ${KUMA_ADMIN_USER})."
+    else
+        warn "Kuma setup failed — log in at https://${KUMA_DOMAIN} to set up manually."
+    fi
 fi
 
 # ── Done ──────────────────────────────────────────────────────────────────────
