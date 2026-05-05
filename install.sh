@@ -168,6 +168,7 @@ DASH_URL=${DASH_URL}
 BASE_DOMAIN=${BASE_DOMAIN}
 KUMA_URL=https://${KUMA_DOMAIN}
 KUMA_INTERNAL_URL=http://uptime-kuma:3001
+KUMA_DB_PATH=/opt/kuma_data/kuma.db
 EOF
 
 # 666 inside a 700 directory: host-protected but writable by the container's www-data.
@@ -199,6 +200,7 @@ KEYCLOAK_BASE_URL=
 KEYCLOAK_CLIENT_ID=lintune-frontend
 KEYCLOAK_ALLOWED_GROUPS=realm-admin
 KEYCLOAK_ADMIN_CLI_CLIENT=admin-cli
+KUMA_DB_PATH=/opt/kuma_data/kuma.db
 EOF
 
 chmod 600 "$INSTALL_DIR/dash.env"
@@ -257,6 +259,7 @@ services:
     volumes:
       - ./admin.env:/var/www/html/lintune-admin/.env
       - ./logs:/var/www/html/lintune-admin/storage/logs/install
+      - kuma_data:/opt/kuma_data
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
@@ -269,6 +272,8 @@ services:
     image: ${DASH_IMAGE}
     restart: unless-stopped
     env_file: dash.env
+    volumes:
+      - kuma_data:/opt/kuma_data:ro
     depends_on:
       db:
         condition: service_healthy
@@ -342,6 +347,7 @@ services:
     volumes:
       - ./admin.env:/var/www/html/lintune-admin/.env
       - ./logs:/var/www/html/lintune-admin/storage/logs/install
+      - kuma_data:/opt/kuma_data
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
@@ -356,6 +362,8 @@ services:
     ports:
       - "8888:80"
     env_file: dash.env
+    volumes:
+      - kuma_data:/opt/kuma_data:ro
     depends_on:
       db:
         condition: service_healthy
