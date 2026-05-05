@@ -439,40 +439,52 @@ docker compose pull
 info "Starting services..."
 docker compose up -d
 
-# ── Seed Kuma admin user ─────────────────────────────────────────────────────
-# Kuma caches "no user found" at startup. Pre-seeding the user before the wizard
-# runs means Kuma starts in normal login mode and no runtime restart is needed.
-
-info "Waiting for Kuma to create its database schema..."
-TRIES=0
-until docker compose exec -T db mariadb -u "${DB_USERNAME}" -p"${DB_PASSWORD}" "${KUMA_DB_NAME}" \
-        -e "SELECT 1 FROM user LIMIT 1" >/dev/null 2>&1; do
-    TRIES=$((TRIES + 1))
-    [ "$TRIES" -ge 60 ] && warn "Kuma schema not ready after 120s; skipping user seed." && break
-    sleep 2
-done
-
-if [ "$TRIES" -lt 60 ]; then
-    KUMA_HASH=$(docker compose exec -T uptime-kuma \
-        node -e "const b=require('bcryptjs');process.stdout.write(b.hashSync('${KUMA_ADMIN_PASSWORD}',10))")
-    docker compose exec -T db mariadb -u "${DB_USERNAME}" -p"${DB_PASSWORD}" "${KUMA_DB_NAME}" \
-        -e "INSERT IGNORE INTO user (username, password, active) VALUES ('${KUMA_ADMIN_USER}', '${KUMA_HASH}', 1);" \
-        2>/dev/null
-    docker compose restart uptime-kuma
-    ok "Kuma admin user seeded (user: ${KUMA_ADMIN_USER})."
-fi
-
 # ── Wait for admin to be reachable ────────────────────────────────────────────
 
 info "Waiting for lintune-admin to be ready..."
 TRIES=0
 until docker compose exec -T lintune-admin php artisan --version >/dev/null 2>&1; do
     TRIES=$((TRIES + 1))
-    [ "$TRIES" -ge 30 ] && die "lintune-admin did not start within 60 seconds. Check logs: docker compose -f $INSTALL_DIR/docker-compose.yml logs lintune-admin"
+    if [ "$TRIES" -ge 30 ]; then
+        die "lintune-admin did not start within 60 seconds. Check logs: docker compose -f $INSTALL_DIR/docker-compose.yml logs lintune-admin"
+    fi
     sleep 2
 done
 
 ok "lintune-admin is up."
+
+# ── Seed Kuma admin user ─────────────────────────────────────────────────────
+# Kuma caches "no user found" at startup. We seed the user now (lintune-admin is
+# up so we can use PHP for bcrypt), then restart Kuma once so it enters login mode.
+
+info "Seeding Kuma admin user..."
+KUMA_SCHEMA_READY=false
+KUMA_TRIES=0
+until docker compose exec -T db mariadb -u "${DB_USERNAME}" -p"${DB_PASSWORD}" "${KUMA_DB_NAME}" \
+        -e "SELECT 1 FROM \`user\` LIMIT 1" >/dev/null 2>&1; do
+    KUMA_TRIES=$((KUMA_TRIES + 1))
+    if [ "$KUMA_TRIES" -ge 30 ]; then
+        warn "Kuma schema not ready; skipping user seed."
+        break
+    fi
+    sleep 2
+done
+if docker compose exec -T db mariadb -u "${DB_USERNAME}" -p"${DB_PASSWORD}" "${KUMA_DB_NAME}" \
+        -e "SELECT 1 FROM \`user\` LIMIT 1" >/dev/null 2>&1; then
+    KUMA_SCHEMA_READY=true
+fi
+
+if $KUMA_SCHEMA_READY; then
+    KUMA_HASH=$(docker compose exec -T lintune-admin \
+        php -r "echo password_hash('${KUMA_ADMIN_PASSWORD}', PASSWORD_BCRYPT, ['cost' => 10]);")
+    docker compose exec -T db mariadb -u "${DB_USERNAME}" -p"${DB_PASSWORD}" "${KUMA_DB_NAME}" \
+        -e "INSERT IGNORE INTO \`user\` (username, password, active) VALUES ('${KUMA_ADMIN_USER}', '${KUMA_HASH}', 1);" \
+        2>/dev/null
+    docker compose restart uptime-kuma >/dev/null 2>&1
+    ok "Kuma admin user seeded (user: ${KUMA_ADMIN_USER})."
+else
+    warn "Kuma user not seeded — log in at https://${KUMA_DOMAIN} to complete setup manually."
+fi
 
 # ── Done ──────────────────────────────────────────────────────────────────────
 
