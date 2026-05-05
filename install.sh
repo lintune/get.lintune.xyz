@@ -117,6 +117,8 @@ DB_PASSWORD=$(openssl rand -hex 20)
 DB_DATABASE=lintune
 DB_USERNAME=lintune
 KUMA_DB_NAME=kuma
+KUMA_ADMIN_USER=admin
+KUMA_ADMIN_PASSWORD=$(openssl rand -hex 16)
 
 ok "Secrets generated."
 
@@ -174,6 +176,8 @@ KUMA_DB_PORT=3306
 KUMA_DB_NAME=${KUMA_DB_NAME}
 KUMA_DB_USERNAME=${DB_USERNAME}
 KUMA_DB_PASSWORD=${DB_PASSWORD}
+KUMA_ADMIN_USER=${KUMA_ADMIN_USER}
+KUMA_ADMIN_PASSWORD=${KUMA_ADMIN_PASSWORD}
 EOF
 
 # 666 inside a 700 directory: host-protected but writable by the container's www-data.
@@ -435,6 +439,29 @@ docker compose pull
 info "Starting services..."
 docker compose up -d
 
+# ── Seed Kuma admin user ─────────────────────────────────────────────────────
+# Kuma caches "no user found" at startup. Pre-seeding the user before the wizard
+# runs means Kuma starts in normal login mode and no runtime restart is needed.
+
+info "Waiting for Kuma to create its database schema..."
+TRIES=0
+until docker compose exec -T db mariadb -u "${DB_USERNAME}" -p"${DB_PASSWORD}" "${KUMA_DB_NAME}" \
+        -e "SELECT 1 FROM user LIMIT 1" >/dev/null 2>&1; do
+    TRIES=$((TRIES + 1))
+    [ "$TRIES" -ge 60 ] && warn "Kuma schema not ready after 120s; skipping user seed." && break
+    sleep 2
+done
+
+if [ "$TRIES" -lt 60 ]; then
+    KUMA_HASH=$(docker compose exec -T uptime-kuma \
+        node -e "const b=require('bcryptjs');process.stdout.write(b.hashSync('${KUMA_ADMIN_PASSWORD}',10))")
+    docker compose exec -T db mariadb -u "${DB_USERNAME}" -p"${DB_PASSWORD}" "${KUMA_DB_NAME}" \
+        -e "INSERT IGNORE INTO user (username, password, active) VALUES ('${KUMA_ADMIN_USER}', '${KUMA_HASH}', 1);" \
+        2>/dev/null
+    docker compose restart uptime-kuma
+    ok "Kuma admin user seeded (user: ${KUMA_ADMIN_USER})."
+fi
+
 # ── Wait for admin to be reachable ────────────────────────────────────────────
 
 info "Waiting for lintune-admin to be ready..."
@@ -454,8 +481,9 @@ bold "╔═══════════════════════�
 bold "║  Lintune is running!                                     ║"
 bold "╚══════════════════════════════════════════════════════════╝"
 printf "\n"
-ok "Admin panel : ${ADMIN_URL}"
-ok "Tenant dash : ${DASH_URL}"
+ok "Admin panel  : ${ADMIN_URL}"
+ok "Tenant dash  : ${DASH_URL}"
+ok "Status page  : https://${KUMA_DOMAIN}  (user: ${KUMA_ADMIN_USER} / ${KUMA_ADMIN_PASSWORD})"
 
 if ! $USE_CADDY; then
     printf "\n"
