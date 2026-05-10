@@ -7,8 +7,8 @@ set -e
 #
 
 INSTALL_DIR=/opt/lintune
-ADMIN_IMAGE=git.nexed.tech/stephan/lintune-admin:latest
-DASH_IMAGE=git.nexed.tech/stephan/lintune-dash:latest
+ADMIN_IMAGE=ghcr.io/lintune/lintune-admin:latest
+DASH_IMAGE=ghcr.io/lintune/lintune-dash:latest
 
 # ── Output helpers ────────────────────────────────────────────────────────────
 
