@@ -189,6 +189,7 @@ policy:
 dns:
   magic_dns: true
   base_domain: lintune.mesh
+  override_local_dns: false
   nameservers:
     global: []
   search_domains: []
@@ -199,10 +200,11 @@ unix_socket_permission: "0770"
 EOF
 
 cat > "$INSTALL_DIR/headscale-data/acls.yaml" << 'EOF'
-acls:
-  - action: accept
-    src: ["*"]
-    dst: ["*:*"]
+{
+  "acls": [
+    {"action": "accept", "src": ["*"], "dst": ["*:*"]}
+  ]
+}
 EOF
 
 ok "Headscale config written."
