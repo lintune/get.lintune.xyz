@@ -7,7 +7,6 @@ set -e
 #
 
 INSTALL_DIR=/opt/lintune
-BACKUP_DIR=/opt/lintune-backup
 ADMIN_IMAGE=ghcr.io/lintune/lintune-admin:latest
 DASH_IMAGE=ghcr.io/lintune/lintune-dash:latest
 BACKUP_IMAGE=ghcr.io/lintune/lintune-backup:latest
@@ -129,11 +128,10 @@ mkdir -p "$INSTALL_DIR/logs"
 chmod 700 "$INSTALL_DIR"
 chmod 777 "$INSTALL_DIR/logs"
 
-mkdir -p "$BACKUP_DIR/data"
-mkdir -p "$BACKUP_DIR/backups"
-chmod 700 "$BACKUP_DIR"
-chmod 777 "$BACKUP_DIR/data"
-chmod 777 "$BACKUP_DIR/backups"
+mkdir -p "$INSTALL_DIR/backup-data"
+mkdir -p "$INSTALL_DIR/backups"
+chmod 777 "$INSTALL_DIR/backup-data"
+chmod 777 "$INSTALL_DIR/backups"
 
 # ── Write Caddyfile (only when using Caddy) ───────────────────────────────────
 
@@ -280,7 +278,7 @@ services:
     volumes:
       - ./admin.env:/var/www/html/lintune-admin/.env
       - ./logs:/var/www/html/lintune-admin/storage/logs/install
-      - ${BACKUP_DIR}/data:/var/lintune-backup
+      - ${INSTALL_DIR}/backup-data:/var/lintune-backup
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
@@ -307,8 +305,8 @@ services:
       - BACKUP_PRIVATE_KEY_PATH=/backups/id_backup
       - BACKUP_STORAGE_PATH=/storage
     volumes:
-      - ${BACKUP_DIR}/data:/backups
-      - ${BACKUP_DIR}/backups:/storage
+      - ${INSTALL_DIR}/backup-data:/backups
+      - ${INSTALL_DIR}/backups:/storage
     extra_hosts:
       - "host.docker.internal:host-gateway"
     networks:
@@ -387,7 +385,7 @@ services:
     volumes:
       - ./admin.env:/var/www/html/lintune-admin/.env
       - ./logs:/var/www/html/lintune-admin/storage/logs/install
-      - ${BACKUP_DIR}/data:/var/lintune-backup
+      - ${INSTALL_DIR}/backup-data:/var/lintune-backup
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
@@ -416,8 +414,8 @@ services:
       - BACKUP_PRIVATE_KEY_PATH=/backups/id_backup
       - BACKUP_STORAGE_PATH=/storage
     volumes:
-      - ${BACKUP_DIR}/data:/backups
-      - ${BACKUP_DIR}/backups:/storage
+      - ${INSTALL_DIR}/backup-data:/backups
+      - ${INSTALL_DIR}/backups:/storage
     extra_hosts:
       - "host.docker.internal:host-gateway"
     networks:
