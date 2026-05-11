@@ -11,6 +11,7 @@ ADMIN_IMAGE=ghcr.io/lintune/lintune-admin:latest
 DASH_IMAGE=ghcr.io/lintune/lintune-dash:latest
 BACKUP_IMAGE=ghcr.io/lintune/lintune-backup:latest
 HEADSCALE_IMAGE=headscale/headscale:latest
+CADDY_IMAGE=ghcr.io/lintune/caddy:latest
 
 # ── Output helpers ────────────────────────────────────────────────────────────
 
@@ -102,9 +103,13 @@ case "$USE_CADDY_REPLY" in
     *)     USE_CADDY=true  ;;
 esac
 
+CF_API_TOKEN=""
 if $USE_CADDY; then
-    info "Caddy will obtain SSL certificates for ${ADMIN_DOMAIN} and ${DASH_DOMAIN} automatically."
-    info "Keycloak, Mailcow, and Nextcloud manage their own SSL or sit behind your external proxy."
+    info "Caddy will obtain SSL certificates via Cloudflare DNS challenge."
+    info "Create a Cloudflare API token with Zone:DNS:Edit + Zone:Zone:Read for your zone."
+    printf "\n"
+    CF_API_TOKEN=$(ask "Cloudflare API token:")
+    [ -n "$CF_API_TOKEN" ] || die "Cloudflare API token is required when using Caddy."
 else
     printf "\n"
     info "Admin will be exposed on port 8889, tenant dashboard on port 8888."
@@ -212,7 +217,16 @@ ok "Headscale config written."
 # ── Write Caddyfile (only when using Caddy) ───────────────────────────────────
 
 if $USE_CADDY; then
-    cat > "$INSTALL_DIR/Caddyfile" << EOF
+    # CF_API_TOKEN is passed via caddy.env at runtime — use Caddy's {$VAR} syntax, not shell expansion
+    cat > "$INSTALL_DIR/Caddyfile" << 'CADDYEOF'
+{
+    acme_dns cloudflare {$CF_API_TOKEN}
+}
+CADDYEOF
+
+    # Append the vhosts with the actual domain names (shell-expanded)
+    cat >> "$INSTALL_DIR/Caddyfile" << EOF
+
 ${ADMIN_DOMAIN} {
     reverse_proxy lintune-admin:80
 }
@@ -262,6 +276,14 @@ EOF
 # The install wizard writes Keycloak credentials and SETUP_COMPLETE back to this file.
 chmod 666 "$INSTALL_DIR/admin.env"
 ok "admin.env written."
+
+if $USE_CADDY; then
+    cat > "$INSTALL_DIR/caddy.env" << EOF
+CF_API_TOKEN=${CF_API_TOKEN}
+EOF
+    chmod 600 "$INSTALL_DIR/caddy.env"
+    ok "caddy.env written."
+fi
 
 # ── Write dash.env ────────────────────────────────────────────────────────────
 
@@ -404,8 +426,9 @@ services:
       - internal
 
   caddy:
-    image: caddy:2-alpine
+    image: ${CADDY_IMAGE}
     restart: unless-stopped
+    env_file: caddy.env
     ports:
       - "80:80"
       - "443:443"
