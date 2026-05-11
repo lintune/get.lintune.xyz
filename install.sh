@@ -132,6 +132,8 @@ chmod 777 "$INSTALL_DIR/logs"
 mkdir -p "$BACKUP_DIR/data"
 mkdir -p "$BACKUP_DIR/backups"
 chmod 700 "$BACKUP_DIR"
+chmod 777 "$BACKUP_DIR/data"
+chmod 777 "$BACKUP_DIR/backups"
 
 # ── Write Caddyfile (only when using Caddy) ───────────────────────────────────
 
