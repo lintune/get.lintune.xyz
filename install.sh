@@ -570,22 +570,31 @@ docker compose up -d
 
 # ── Bootstrap Headscale API key ───────────────────────────────────────────────
 
-info "Waiting for Headscale to be ready and generating API key..."
+info "Waiting for Headscale to be ready..."
 HS_API_KEY=""
 HS_TRIES=0
-until HS_API_KEY=$(docker compose exec -T headscale headscale apikeys create --expiration 9999d 2>/dev/null | tr -d '[:space:]') && [ -n "$HS_API_KEY" ]; do
+# Phase 1: wait until headscale HTTP endpoint responds (up to 3 minutes)
+until curl -sf http://127.0.0.1:8085/health >/dev/null 2>&1; do
     HS_TRIES=$((HS_TRIES + 1))
-    if [ "$HS_TRIES" -ge 30 ]; then
-        warn "Headscale did not start within 60 seconds — VPN mesh wizard step will be unavailable."
-        HS_API_KEY=""
+    if [ "$HS_TRIES" -ge 90 ]; then
+        warn "Headscale did not start within 3 minutes — VPN mesh wizard step will be unavailable."
         break
     fi
     sleep 2
 done
 
-if [ -n "$HS_API_KEY" ]; then
-    printf '\nHEADSCALE_API_KEY=%s\nHEADSCALE_URL=https://%s\n' "$HS_API_KEY" "$HS_DOMAIN" >> "$INSTALL_DIR/admin.env"
-    ok "Headscale API key generated."
+# Phase 2: headscale is up — create the API key once
+if [ "$HS_TRIES" -lt 90 ]; then
+    info "Headscale is up. Generating API key..."
+    HS_API_KEY=$(docker compose exec -T headscale headscale apikeys create --expiration 9999d 2>&1 | tr -d '[:space:]')
+    # Strip any non-key characters (e.g. warnings) — valid key starts with "hskey-api-"
+    HS_API_KEY=$(printf '%s' "$HS_API_KEY" | grep -o 'hskey-api-[A-Za-z0-9_-]*')
+    if [ -n "$HS_API_KEY" ]; then
+        printf '\nHEADSCALE_API_KEY=%s\nHEADSCALE_URL=https://%s\n' "$HS_API_KEY" "$HS_DOMAIN" >> "$INSTALL_DIR/admin.env"
+        ok "Headscale API key generated."
+    else
+        warn "Failed to generate Headscale API key — VPN mesh wizard step will be unavailable."
+    fi
 fi
 
 # ── Wait for admin to be reachable ────────────────────────────────────────────
