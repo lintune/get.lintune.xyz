@@ -399,7 +399,7 @@ services:
     volumes:
       - ${INSTALL_DIR}/headscale-data:/etc/headscale
     ports:
-      - "3478:3478/udp"
+      - "3479:3479/udp"
     networks:
       - internal
 
@@ -520,7 +520,7 @@ services:
       - ${INSTALL_DIR}/headscale-data:/etc/headscale
     ports:
       - "8085:8080"
-      - "3478:3478/udp"
+      - "3479:3479/udp"
     networks:
       - internal
 
