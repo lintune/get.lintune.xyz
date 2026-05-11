@@ -10,6 +10,7 @@ INSTALL_DIR=/opt/lintune
 ADMIN_IMAGE=ghcr.io/lintune/lintune-admin:latest
 DASH_IMAGE=ghcr.io/lintune/lintune-dash:latest
 BACKUP_IMAGE=ghcr.io/lintune/lintune-backup:latest
+HEADSCALE_IMAGE=headscale/headscale:latest
 
 # ── Output helpers ────────────────────────────────────────────────────────────
 
@@ -75,6 +76,7 @@ BASE_DOMAIN=$(ask "Base domain (e.g. lintune.company.com):")
 ADMIN_DOMAIN="admin.${BASE_DOMAIN}"
 DASH_DOMAIN="dash.${BASE_DOMAIN}"
 KUMA_DOMAIN="isitup.${BASE_DOMAIN}"
+HS_DOMAIN="vpn.${BASE_DOMAIN}"
 
 ADMIN_URL="https://${ADMIN_DOMAIN}"
 DASH_URL="https://${DASH_DOMAIN}"
@@ -89,6 +91,7 @@ info "  Mailcow      ->  mail.${BASE_DOMAIN}"
 info "  Nextcloud    ->  cloud.${BASE_DOMAIN}"
 info "  Vaultwarden  ->  vault.${BASE_DOMAIN}"
 info "  Status       ->  ${KUMA_DOMAIN}"
+info "  VPN Mesh     ->  ${HS_DOMAIN}"
 printf "\n"
 
 # ── Reverse proxy choice ───────────────────────────────────────────────────────
@@ -133,6 +136,77 @@ mkdir -p "$INSTALL_DIR/backups"
 chmod 777 "$INSTALL_DIR/backup-data"
 chmod 777 "$INSTALL_DIR/backups"
 
+mkdir -p "$INSTALL_DIR/headscale-data"
+chmod 700 "$INSTALL_DIR/headscale-data"
+
+# ── Write Headscale config ────────────────────────────────────────────────────
+
+cat > "$INSTALL_DIR/headscale-data/config.yaml" << EOF
+server_url: https://${HS_DOMAIN}
+listen_addr: 0.0.0.0:8080
+metrics_listen_addr: 127.0.0.1:9090
+grpc_listen_addr: 0.0.0.0:50443
+grpc_allow_insecure: false
+
+noise:
+  private_key_path: /etc/headscale/noise_private.key
+
+prefixes:
+  v4: 100.64.0.0/10
+  v6: fd7a:115c:a1e0::/48
+  allocation: sequential
+
+derp:
+  server:
+    enabled: true
+    region_id: 999
+    region_code: lintune
+    region_name: "Lintune DERP"
+    stun_listen_addr: "0.0.0.0:3478"
+    private_key_path: /etc/headscale/derp_server_private.key
+    automatically_add_embedded_derp_region: true
+  paths: []
+  auto_update_enabled: false
+  update_frequency: 24h
+
+disable_check_updates: true
+ephemeral_node_inactivity_timeout: 30m
+node_update_check_interval: 10s
+
+database:
+  type: sqlite
+  sqlite:
+    path: /etc/headscale/db.sqlite
+
+log:
+  format: text
+  level: info
+
+policy:
+  mode: file
+  path: /etc/headscale/acls.yaml
+
+dns:
+  magic_dns: true
+  base_domain: lintune.mesh
+  nameservers:
+    global: []
+  search_domains: []
+  extra_records: []
+
+unix_socket: /var/run/headscale/headscale.sock
+unix_socket_permission: "0770"
+EOF
+
+cat > "$INSTALL_DIR/headscale-data/acls.yaml" << 'EOF'
+acls:
+  - action: accept
+    src: ["*"]
+    dst: ["*:*"]
+EOF
+
+ok "Headscale config written."
+
 # ── Write Caddyfile (only when using Caddy) ───────────────────────────────────
 
 if $USE_CADDY; then
@@ -147,6 +221,10 @@ ${DASH_DOMAIN} {
 
 ${KUMA_DOMAIN} {
     reverse_proxy uptime-kuma:3001
+}
+
+${HS_DOMAIN} {
+    reverse_proxy headscale:8080
 }
 EOF
     ok "Caddyfile written."
@@ -312,6 +390,17 @@ services:
     networks:
       - internal
 
+  headscale:
+    image: ${HEADSCALE_IMAGE}
+    restart: unless-stopped
+    command: serve
+    volumes:
+      - ${INSTALL_DIR}/headscale-data:/etc/headscale
+    ports:
+      - "3478:3478/udp"
+    networks:
+      - internal
+
   caddy:
     image: caddy:2-alpine
     restart: unless-stopped
@@ -421,6 +510,18 @@ services:
     networks:
       - internal
 
+  headscale:
+    image: ${HEADSCALE_IMAGE}
+    restart: unless-stopped
+    command: serve
+    volumes:
+      - ${INSTALL_DIR}/headscale-data:/etc/headscale
+    ports:
+      - "8085:8080"
+      - "3478:3478/udp"
+    networks:
+      - internal
+
   uptime-kuma:
     image: ghcr.io/lintune/uptime-kuma:latest
     restart: unless-stopped
@@ -465,6 +566,30 @@ docker compose pull
 info "Starting services..."
 docker compose up -d
 
+# ── Bootstrap Headscale API key ───────────────────────────────────────────────
+
+info "Waiting for Headscale to be ready..."
+HS_TRIES=0
+until docker compose exec -T headscale headscale users list >/dev/null 2>&1; do
+    HS_TRIES=$((HS_TRIES + 1))
+    if [ "$HS_TRIES" -ge 30 ]; then
+        warn "Headscale did not start within 60 seconds — VPN mesh will need manual setup."
+        HS_API_KEY=""
+        break
+    fi
+    sleep 2
+done
+
+if [ "${HS_TRIES:-0}" -lt 30 ]; then
+    HS_API_KEY=$(docker compose exec -T headscale headscale apikeys create --expiration 9999d 2>/dev/null | tr -d '[:space:]')
+    if [ -n "$HS_API_KEY" ]; then
+        printf '\nHEADSCALE_API_KEY=%s\nHEADSCALE_URL=https://%s\n' "$HS_API_KEY" "$HS_DOMAIN" >> "$INSTALL_DIR/admin.env"
+        ok "Headscale API key generated."
+    else
+        warn "Could not generate Headscale API key — VPN mesh wizard step will be unavailable."
+    fi
+fi
+
 # ── Wait for admin to be reachable ────────────────────────────────────────────
 
 info "Waiting for lintune-admin to be ready..."
@@ -481,6 +606,18 @@ ok "lintune-admin is up."
 
 ok "Uptime Kuma will be configured during the web setup wizard."
 
+# Restart lintune-admin to pick up HEADSCALE_API_KEY written to admin.env
+if [ -n "$HS_API_KEY" ]; then
+    info "Restarting lintune-admin to load Headscale API key..."
+    docker compose restart lintune-admin
+    TRIES=0
+    until docker compose exec -T lintune-admin php artisan --version >/dev/null 2>&1; do
+        TRIES=$((TRIES + 1))
+        [ "$TRIES" -ge 20 ] && break
+        sleep 2
+    done
+fi
+
 # ── Done ──────────────────────────────────────────────────────────────────────
 
 printf "\n"
@@ -491,12 +628,14 @@ printf "\n"
 ok "Admin panel  : ${ADMIN_URL}"
 ok "Tenant dash  : ${DASH_URL}"
 ok "Status page  : https://${KUMA_DOMAIN}  (credentials set during wizard)"
+ok "VPN Mesh     : https://${HS_DOMAIN}    (enable in setup wizard)"
 
 if ! $USE_CADDY; then
     printf "\n"
     info "Ports exposed on this host:"
-    info "  Admin : 8889  ->  point your proxy to http://$(hostname -I | awk '{print $1}'):8889"
-    info "  Dash  : 8888  ->  point your proxy to http://$(hostname -I | awk '{print $1}'):8888"
+    info "  Admin      : 8889  ->  point your proxy to http://$(hostname -I | awk '{print $1}'):8889"
+    info "  Dash       : 8888  ->  point your proxy to http://$(hostname -I | awk '{print $1}'):8888"
+    info "  Headscale  : 8085  ->  point your proxy to http://$(hostname -I | awk '{print $1}'):8085"
 fi
 
 printf "\n"
