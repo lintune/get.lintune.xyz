@@ -162,7 +162,7 @@ derp:
     region_id: 999
     region_code: lintune
     region_name: "Lintune DERP"
-    stun_listen_addr: "0.0.0.0:3478"
+    stun_listen_addr: "0.0.0.0:3479"
     private_key_path: /etc/headscale/derp_server_private.key
     automatically_add_embedded_derp_region: true
   paths: []
