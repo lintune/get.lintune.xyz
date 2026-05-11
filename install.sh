@@ -7,8 +7,10 @@ set -e
 #
 
 INSTALL_DIR=/opt/lintune
+BACKUP_DIR=/opt/lintune-backup
 ADMIN_IMAGE=ghcr.io/lintune/lintune-admin:latest
 DASH_IMAGE=ghcr.io/lintune/lintune-dash:latest
+BACKUP_IMAGE=ghcr.io/lintune/lintune-backup:latest
 
 # ── Output helpers ────────────────────────────────────────────────────────────
 
@@ -127,6 +129,10 @@ mkdir -p "$INSTALL_DIR/logs"
 chmod 700 "$INSTALL_DIR"
 chmod 777 "$INSTALL_DIR/logs"
 
+mkdir -p "$BACKUP_DIR/data"
+mkdir -p "$BACKUP_DIR/backups"
+chmod 700 "$BACKUP_DIR"
+
 # ── Write Caddyfile (only when using Caddy) ───────────────────────────────────
 
 if $USE_CADDY; then
@@ -169,6 +175,7 @@ DASH_URL=${DASH_URL}
 BASE_DOMAIN=${BASE_DOMAIN}
 KUMA_URL=https://${KUMA_DOMAIN}
 KUMA_INTERNAL_URL=http://uptime-kuma:3001
+BACKUP_SHARED_PATH=/var/lintune-backup
 EOF
 
 # 666 inside a 700 directory: host-protected but writable by the container's www-data.
@@ -271,6 +278,7 @@ services:
     volumes:
       - ./admin.env:/var/www/html/lintune-admin/.env
       - ./logs:/var/www/html/lintune-admin/storage/logs/install
+      - ${BACKUP_DIR}/data:/var/lintune-backup
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
@@ -286,6 +294,21 @@ services:
     depends_on:
       db:
         condition: service_healthy
+    networks:
+      - internal
+
+  lintune-backup:
+    image: ${BACKUP_IMAGE}
+    restart: unless-stopped
+    environment:
+      - BACKUP_CRON=0 2 * * *
+      - BACKUP_PRIVATE_KEY_PATH=/backups/id_backup
+      - BACKUP_STORAGE_PATH=/storage
+    volumes:
+      - ${BACKUP_DIR}/data:/backups
+      - ${BACKUP_DIR}/backups:/storage
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     networks:
       - internal
 
@@ -362,6 +385,7 @@ services:
     volumes:
       - ./admin.env:/var/www/html/lintune-admin/.env
       - ./logs:/var/www/html/lintune-admin/storage/logs/install
+      - ${BACKUP_DIR}/data:/var/lintune-backup
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
@@ -379,6 +403,21 @@ services:
     depends_on:
       db:
         condition: service_healthy
+    networks:
+      - internal
+
+  lintune-backup:
+    image: ${BACKUP_IMAGE}
+    restart: unless-stopped
+    environment:
+      - BACKUP_CRON=0 2 * * *
+      - BACKUP_PRIVATE_KEY_PATH=/backups/id_backup
+      - BACKUP_STORAGE_PATH=/storage
+    volumes:
+      - ${BACKUP_DIR}/data:/backups
+      - ${BACKUP_DIR}/backups:/storage
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     networks:
       - internal
 
