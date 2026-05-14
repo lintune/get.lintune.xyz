@@ -12,6 +12,7 @@ DASH_IMAGE=ghcr.io/lintune/lintune-dash:latest
 BACKUP_IMAGE=ghcr.io/lintune/lintune-backup:latest
 HEADSCALE_IMAGE=headscale/headscale:latest
 CADDY_IMAGE=ghcr.io/lintune/caddy:latest
+UPTIME_KUMA_IMAGE=ghcr.io/lintune/lintune-uptimekuma:latest
 
 # ── Output helpers ────────────────────────────────────────────────────────────
 
@@ -441,7 +442,7 @@ services:
       - internal
 
   uptime-kuma:
-    image: ghcr.io/lintune/uptime-kuma:latest
+    image: ${UPTIME_KUMA_IMAGE}
     restart: unless-stopped
     environment:
       - UPTIME_KUMA_DB_TYPE=mariadb
@@ -548,7 +549,7 @@ services:
       - internal
 
   uptime-kuma:
-    image: ghcr.io/lintune/uptime-kuma:latest
+    image: ${UPTIME_KUMA_IMAGE}
     restart: unless-stopped
     environment:
       - UPTIME_KUMA_DB_TYPE=mariadb
