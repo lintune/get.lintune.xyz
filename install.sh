@@ -13,6 +13,7 @@ BACKUP_IMAGE=ghcr.io/lintune/lintune-backup:latest
 HEADSCALE_IMAGE=headscale/headscale:latest
 CADDY_IMAGE=ghcr.io/lintune/caddy:latest
 UPTIME_KUMA_IMAGE=ghcr.io/lintune/lintune-uptimekuma:latest
+VW_IMAGE=vaultwarden/server:latest
 
 # ── Output helpers ────────────────────────────────────────────────────────────
 
@@ -127,6 +128,7 @@ DB_PASSWORD=$(openssl rand -hex 20)
 DB_DATABASE=lintune
 DB_USERNAME=lintune
 KUMA_DB_NAME=kuma
+VW_ADMIN_PLAIN=$(openssl rand -base64 24)
 
 ok "Secrets generated."
 
@@ -243,6 +245,10 @@ ${KUMA_DOMAIN} {
 ${HS_DOMAIN} {
     reverse_proxy headscale:8080
 }
+
+vault.${BASE_DOMAIN} {
+    reverse_proxy vaultwarden:80
+}
 EOF
     ok "Caddyfile written."
 fi
@@ -316,6 +322,19 @@ EOF
 chmod 600 "$INSTALL_DIR/dash.env"
 ok "dash.env written."
 
+# ── Write vaultwarden.env ────────────────────────────────────────────────────
+
+cat > "$INSTALL_DIR/vaultwarden.env" << EOF
+DOMAIN=https://vault.${BASE_DOMAIN}
+WEBSOCKET_ENABLED=true
+SIGNUPS_ALLOWED=false
+SSO_ENABLED=true
+EOF
+
+# ADMIN_TOKEN (Argon2 hash) is appended below after images are pulled.
+chmod 600 "$INSTALL_DIR/vaultwarden.env"
+ok "vaultwarden.env written."
+
 # ── Write secrets reference ───────────────────────────────────────────────────
 
 cat > "$INSTALL_DIR/.env" << EOF
@@ -332,6 +351,9 @@ DB_DATABASE=${DB_DATABASE}
 DB_USERNAME=${DB_USERNAME}
 DB_PASSWORD=${DB_PASSWORD}
 DB_ROOT_PASSWORD=${DB_ROOT_PASSWORD}
+
+VW_ADMIN_TOKEN=${VW_ADMIN_PLAIN}
+VW_ADMIN_URL=https://vault.${BASE_DOMAIN}/admin
 EOF
 
 chmod 600 "$INSTALL_DIR/.env"
@@ -457,10 +479,20 @@ services:
     networks:
       - internal
 
+  vaultwarden:
+    image: ${VW_IMAGE}
+    restart: unless-stopped
+    env_file: vaultwarden.env
+    volumes:
+      - vw_data:/data
+    networks:
+      - internal
+
 volumes:
   db_data:
   caddy_data:
   caddy_config:
+  vw_data:
 
 networks:
   internal:
@@ -566,8 +598,20 @@ services:
     networks:
       - internal
 
+  vaultwarden:
+    image: ${VW_IMAGE}
+    restart: unless-stopped
+    env_file: vaultwarden.env
+    volumes:
+      - vw_data:/data
+    ports:
+      - "8887:80"
+    networks:
+      - internal
+
 volumes:
   db_data:
+  vw_data:
 
 networks:
   internal:
@@ -588,6 +632,15 @@ cd "$INSTALL_DIR"
 
 info "Pulling images..."
 docker compose pull
+
+info "Generating Vaultwarden admin token hash..."
+VW_ADMIN_HASH=$(printf '%s' "$VW_ADMIN_PLAIN" | docker run --rm -i "$VW_IMAGE" /vaultwarden hash --preset owasp 2>/dev/null | tail -1)
+if printf '%s' "$VW_ADMIN_HASH" | grep -q '^\$argon2'; then
+    printf 'ADMIN_TOKEN=%s\n' "$VW_ADMIN_HASH" >> "$INSTALL_DIR/vaultwarden.env"
+    ok "Vaultwarden admin token set."
+else
+    warn "Could not generate Argon2 hash — set ADMIN_TOKEN manually in $INSTALL_DIR/vaultwarden.env"
+fi
 
 info "Starting services..."
 docker compose up -d
@@ -658,6 +711,7 @@ bold "╚═══════════════════════�
 printf "\n"
 ok "Admin panel  : ${ADMIN_URL}"
 ok "Tenant dash  : ${DASH_URL}"
+ok "Vault        : https://vault.${BASE_DOMAIN}  (admin at /admin — token in .env)"
 ok "Status page  : https://${KUMA_DOMAIN}  (credentials set during wizard)"
 ok "VPN Mesh     : https://${HS_DOMAIN}    (enable in setup wizard)"
 
@@ -667,6 +721,7 @@ if ! $USE_CADDY; then
     info "  Admin      : 8889  ->  point your proxy to http://$(hostname -I | awk '{print $1}'):8889"
     info "  Dash       : 8888  ->  point your proxy to http://$(hostname -I | awk '{print $1}'):8888"
     info "  Headscale  : 8085  ->  point your proxy to http://$(hostname -I | awk '{print $1}'):8085"
+    info "  Vault      : 8887  ->  point your proxy to http://$(hostname -I | awk '{print $1}'):8887"
 fi
 
 printf "\n"
