@@ -640,12 +640,26 @@ info "Pulling images..."
 docker compose pull
 
 info "Generating Vaultwarden admin token hash..."
-VW_ADMIN_HASH=$(printf '%s' "$VW_ADMIN_PLAIN" | docker run --rm -i "$VW_IMAGE" /vaultwarden hash --preset owasp 2>/dev/null | tail -1)
-if printf '%s' "$VW_ADMIN_HASH" | grep -q '^\$argon2'; then
-    printf 'ADMIN_TOKEN=%s\n' "$VW_ADMIN_HASH" >> "$INSTALL_DIR/vaultwarden.env"
-    ok "Vaultwarden admin token set."
+if ! command -v argon2 >/dev/null 2>&1; then
+    if command -v apt-get >/dev/null 2>&1; then
+        apt-get install -y -q argon2 >/dev/null 2>&1 || true
+    elif command -v dnf >/dev/null 2>&1; then
+        dnf install -y -q argon2 >/dev/null 2>&1 || true
+    elif command -v yum >/dev/null 2>&1; then
+        yum install -y -q argon2 >/dev/null 2>&1 || true
+    fi
+fi
+if command -v argon2 >/dev/null 2>&1; then
+    # Parameters match vaultwarden hash --preset owasp: argon2id, m=65536 KiB, t=3, p=4, l=32
+    VW_ADMIN_HASH=$(printf '%s' "$VW_ADMIN_PLAIN" | argon2 "$(openssl rand -hex 16)" -id -t 3 -m 16 -p 4 -l 32 -e 2>/dev/null)
+    if printf '%s' "$VW_ADMIN_HASH" | grep -q '^\$argon2'; then
+        printf 'ADMIN_TOKEN=%s\n' "$VW_ADMIN_HASH" >> "$INSTALL_DIR/vaultwarden.env"
+        ok "Vaultwarden admin token set."
+    else
+        warn "Could not generate Argon2 hash — set ADMIN_TOKEN manually in $INSTALL_DIR/vaultwarden.env"
+    fi
 else
-    warn "Could not generate Argon2 hash — set ADMIN_TOKEN manually in $INSTALL_DIR/vaultwarden.env"
+    warn "argon2 not available — set ADMIN_TOKEN manually in $INSTALL_DIR/vaultwarden.env"
 fi
 
 info "Starting services..."
@@ -656,8 +670,9 @@ docker compose up -d
 info "Waiting for Headscale to be ready..."
 HS_API_KEY=""
 HS_TRIES=0
-# Phase 1: wait until headscale HTTP endpoint responds (up to 3 minutes)
-until curl -sf http://127.0.0.1:8085/health >/dev/null 2>&1; do
+# Poll the headscale unix socket via docker exec — works in both Caddy and no-Caddy mode
+# since the HTTP port is only exposed to the host in the no-Caddy config.
+until docker compose exec -T headscale headscale users list >/dev/null 2>&1; do
     HS_TRIES=$((HS_TRIES + 1))
     if [ "$HS_TRIES" -ge 90 ]; then
         warn "Headscale did not start within 3 minutes — VPN mesh wizard step will be unavailable."
@@ -666,7 +681,6 @@ until curl -sf http://127.0.0.1:8085/health >/dev/null 2>&1; do
     sleep 2
 done
 
-# Phase 2: headscale is up — create the API key once
 if [ "$HS_TRIES" -lt 90 ]; then
     info "Headscale is up. Generating API key..."
     HS_API_KEY=$(docker compose exec -T headscale headscale apikeys create --expiration 9999d 2>&1 | tr -d '[:space:]')
