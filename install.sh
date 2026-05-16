@@ -329,6 +329,12 @@ DOMAIN=https://vault.${BASE_DOMAIN}
 WEBSOCKET_ENABLED=true
 SIGNUPS_ALLOWED=false
 SSO_ENABLED=true
+# Placeholders satisfy Vaultwarden's startup validation.
+# Real values are written to /data/config.json by lintune-admin after Keycloak is configured —
+# config.json takes precedence over these env vars without a container restart.
+SSO_AUTHORITY=https://placeholder.invalid
+SSO_CLIENT_ID=placeholder
+SSO_CLIENT_SECRET=placeholder
 EOF
 
 # ADMIN_TOKEN (Argon2 hash) is appended below after images are pulled.
