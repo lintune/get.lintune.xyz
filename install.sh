@@ -661,7 +661,7 @@ if command -v argon2 >/dev/null 2>&1; then
     # Parameters match vaultwarden hash --preset owasp: argon2id, m=65536 KiB, t=3, p=4, l=32
     VW_ADMIN_HASH=$(printf '%s' "$VW_ADMIN_PLAIN" | argon2 "$(openssl rand -hex 16)" -id -t 3 -m 16 -p 4 -l 32 -e 2>/dev/null)
     if printf '%s' "$VW_ADMIN_HASH" | grep -q '^\$argon2'; then
-        printf 'ADMIN_TOKEN=%s\n' "$VW_ADMIN_HASH" >> "$INSTALL_DIR/vaultwarden.env"
+        printf "ADMIN_TOKEN='%s'\n" "$VW_ADMIN_HASH" >> "$INSTALL_DIR/vaultwarden.env"
         ok "Vaultwarden admin token set."
     else
         warn "Could not generate Argon2 hash — set ADMIN_TOKEN manually in $INSTALL_DIR/vaultwarden.env"
