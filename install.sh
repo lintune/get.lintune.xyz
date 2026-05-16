@@ -73,7 +73,7 @@ printf "\n"
 
 # ── Base domain ────────────────────────────────────────────────────────────────
 
-BASE_DOMAIN=$(ask "Base domain (e.g. lintune.company.com):")
+BASE_DOMAIN=${BASE_DOMAIN:-$(ask "Base domain (e.g. lintune.company.com):")}
 [ -n "$BASE_DOMAIN" ] || die "Base domain is required."
 
 ADMIN_DOMAIN="admin.${BASE_DOMAIN}"
@@ -99,18 +99,26 @@ printf "\n"
 
 # ── Reverse proxy choice ───────────────────────────────────────────────────────
 
-USE_CADDY_REPLY=$(ask "Use Caddy as automatic reverse proxy with SSL for admin + dash? [Y/n]")
-case "$USE_CADDY_REPLY" in
-    [nN]*) USE_CADDY=false ;;
-    *)     USE_CADDY=true  ;;
-esac
+if [ -n "${USE_CADDY+x}" ]; then
+    # Already set in environment — normalise to true/false
+    case "$USE_CADDY" in
+        [nN]*|false) USE_CADDY=false ;;
+        *)           USE_CADDY=true  ;;
+    esac
+else
+    USE_CADDY_REPLY=$(ask "Use Caddy as automatic reverse proxy with SSL for admin + dash? [Y/n]")
+    case "$USE_CADDY_REPLY" in
+        [nN]*) USE_CADDY=false ;;
+        *)     USE_CADDY=true  ;;
+    esac
+fi
 
 CF_API_TOKEN=""
 if $USE_CADDY; then
     info "Caddy will obtain SSL certificates via Cloudflare DNS challenge."
     info "Create a Cloudflare API token with Zone:DNS:Edit + Zone:Zone:Read for your zone."
     printf "\n"
-    CF_API_TOKEN=$(ask "Cloudflare API token:")
+    CF_API_TOKEN=${CF_API_TOKEN:-$(ask "Cloudflare API token:")}
     [ -n "$CF_API_TOKEN" ] || die "Cloudflare API token is required when using Caddy."
 else
     printf "\n"
